@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.dylib
+*.egg-info/
+.eggs/
+*.egg
+build/
+dist/
+
+# Virtual envs
+.venv/
+venv/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb~
+
+# OS
+.DS_Store
+
+# Tooling
+.cache/
+.mypy_cache/
+.pytype/
+.pyre/
+
+# Editor/project artifacts
+.vscode/
+.cursor/
+.specstory/
+
+# Data and outputs (keep repo light)
+data/
+artifacts/
+submissions/
+
+# Logs
+*.log

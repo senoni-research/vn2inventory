@@ -1,0 +1,20 @@
+columns:
+  store_id: Store
+  product_id: Product
+  sales_qty: Qty
+  sales_date: Week
+  on_hand: OnHand
+  in_transit_cols: [InTransit_W1, InTransit_W2]
+
+policy:
+  lead_time_weeks: 2
+  review_period_weeks: 1
+  shortage_cost_per_unit: 1.0
+  holding_cost_per_unit_per_week: 0.2
+  # Optional hard floor on service level (e.g., 0.90)
+  min_service_level: null
+  # Optional cap on per-item order
+  max_order_per_item: null
+
+submission:
+  column_name: order_qty
