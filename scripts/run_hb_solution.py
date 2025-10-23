@@ -66,6 +66,12 @@ def main():
         default=str(Path("/Users/senoni/noni/relational-graph/artifacts/orders_features_599_idemb_asof.csv")),
         help="Path to 599-row features with weekly moments for weekly judge"
     )
+    parser.add_argument(
+        "--cutoff",
+        type=str,
+        default="2024-04-08",
+        help="Cutoff week (e.g., 2024-04-08 for Week 0, 2024-04-15 for Week 1)"
+    )
     
     args = parser.parse_args()
     
@@ -241,6 +247,7 @@ def main():
             if c not in feat.columns:
                 raise ValueError(f"weekly judge requires column {c} in {features_path}")
         feat = feat[need]
+        # State used for week-1 judge remains Week 0, which is prior to any new orders
         state = pd.read_csv(data_dir/"Week 0 - 2024-04-08 - Initial State.csv")
         state["Store"] = state["Store"].astype(str); state["Product"] = state["Product"].astype(str)
         state["onhand"] = pd.to_numeric(state["End Inventory"], errors="coerce").fillna(0)
@@ -307,7 +314,7 @@ def main():
         pipe_base = HBPipeline(HBConfig(data_dir=data_dir, output_dir=base_out, graph_features_path=None))
         pipe_base.load_data(); pipe_base.fit_model()
         # Run a short CV or reuse knobs from above; use best_knobs if available
-        sub_base = pipe_base.generate_submission(best_knobs, cutoff_week="2024-04-08")
+        sub_base = pipe_base.generate_submission(best_knobs, cutoff_week=args.cutoff)
         bp = base_out / "orders_hierarchical_final_store_cv.csv"
         export_submission_safe(sub_base, bp)
 
@@ -316,7 +323,7 @@ def main():
         graph_out.mkdir(parents=True, exist_ok=True)
         pipe_graph = HBPipeline(HBConfig(data_dir=data_dir, output_dir=graph_out, graph_features_path=Path(args.features_599)))
         pipe_graph.load_data(); pipe_graph.load_graph_features_if_available(); pipe_graph.fit_model()
-        sub_graph = pipe_graph.generate_submission(best_knobs, cutoff_week="2024-04-08", apply_hb_cap=True, baseline_orders=sub_base)
+        sub_graph = pipe_graph.generate_submission(best_knobs, cutoff_week=args.cutoff, apply_hb_cap=True, baseline_orders=sub_base)
         gp = graph_out / "orders_hierarchical_graph_enhanced_cv.csv"
         export_submission_safe(sub_graph, gp)
 
@@ -332,7 +339,7 @@ def main():
     else:
         submission = pipeline.generate_submission(
             best_knobs,
-            cutoff_week="2024-04-08",
+            cutoff_week=args.cutoff,
             apply_hb_cap=args.apply_cap,
             baseline_orders=baseline_orders_df
         )

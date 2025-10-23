@@ -313,10 +313,18 @@ class HBPipeline:
             hist_max = meta.hist_max_weekly.iloc[i] if "hist_max_weekly" in meta.columns else 0
             p95 = meta.p95_weekly.iloc[i] if "p95_weekly" in meta.columns else 0
             
+            mu13_recent = meta.mu13_recent.iloc[i] if "mu13_recent" in meta.columns else np.nan
             order = compute_order_with_guardrails(
-                need, int(inv_pos[i]), d3_samples,
-                hist_max, p95, abc_i, xyz_i, mu[i],
-                self.config.protection_weeks
+                need=need,
+                inv_pos=int(inv_pos[i]),
+                d3_samples=d3_samples,
+                hist_max=hist_max,
+                p95=p95,
+                abc=abc_i,
+                xyz=xyz_i,
+                mu=mu[i],
+                mu13_recent=float(mu13_recent) if pd.notna(mu13_recent) else None,
+                protection_weeks=self.config.protection_weeks
             )
             
             orders[i] = order
