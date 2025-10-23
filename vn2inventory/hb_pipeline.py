@@ -361,15 +361,49 @@ class HBPipeline:
         Uses historical state reconstruction if available, otherwise falls back
         to Week 0 state approximation.
         """
-        if self.state_reconstructor is not None:
-            # Use accurate historical state reconstruction
+        cutoff_dt = pd.to_datetime(cutoff_week)
+        week0_dt = pd.to_datetime("2024-04-08")
+
+        # If we have a reconstructor, use it for dates before Week 0
+        if self.state_reconstructor is not None and cutoff_dt < week0_dt:
             return self.state_reconstructor.reconstruct_state_at(cutoff_week)
-        else:
-            # Fallback: Week 0 state approximation
-            return self.state_df.rename(columns={
-                "on_hand": "OnHand",
-                "on_order": "InTransitW+1"
-            }).assign(**{"InTransitW+2": 0})
+
+        # For cutoffs at/after Week 0, prefer an explicit Initial State file if present
+        try:
+            weeks_ahead = int(max(0, (cutoff_dt - week0_dt).days // 7))
+        except Exception:
+            weeks_ahead = 0
+        if weeks_ahead >= 1:
+            # Try to load e.g., "Week 1 - 2024-04-15 - Initial State.csv"
+            fname = f"Week {weeks_ahead} - {cutoff_week} - Initial State.csv"
+            path = self.config.data_dir / fname
+            if path.exists():
+                st = pd.read_csv(path)
+                st = st.rename(columns={
+                    self.config.col_onhand: "OnHand",
+                })
+                # Map transit columns if available
+                w1 = "In Transit W+1" if "In Transit W+1" in st.columns else None
+                w2 = "In Transit W+2" if "In Transit W+2" in st.columns else None
+                st_out = pd.DataFrame({
+                    "OnHand": pd.to_numeric(st.get("OnHand", st.get(self.config.col_onhand, 0)), errors="coerce").fillna(0.0),
+                    "InTransitW+1": pd.to_numeric(st.get(w1, 0), errors="coerce").fillna(0.0),
+                    "InTransitW+2": pd.to_numeric(st.get(w2, 0), errors="coerce").fillna(0.0),
+                })
+                st_out.index = st[[self.config.col_store, self.config.col_product]].apply(tuple, axis=1)
+                # Align to template index if available
+                try:
+                    idx = self.idx_df.index
+                    st_out = st_out.reindex(idx).fillna(0.0)
+                except Exception:
+                    pass
+                return st_out
+
+        # Default: Week 0 state approximation
+        return self.state_df.rename(columns={
+            "on_hand": "OnHand",
+            "on_order": "InTransitW+1"
+        }).assign(**{"InTransitW+2": 0})
     
     def generate_submission(
         self,
