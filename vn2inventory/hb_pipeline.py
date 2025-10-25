@@ -333,8 +333,7 @@ class HBPipeline:
     
     def _fit_params_up_to(self, cutoff_week: str) -> pd.DataFrame:
         """Simplified EB refit on historical subset for CV."""
-        # Exclude the cutoff week itself to avoid leakage
-        sl_subset = self.sl[self.sl["week_monday"] < pd.to_datetime(cutoff_week)].copy()
+        sl_subset = self.sl[self.sl["week_monday"] <= pd.to_datetime(cutoff_week)].copy()
         
         mu_hist = sl_subset.groupby(self.sku_grp)["mu_eb"].mean()
         alpha_hist = sl_subset.groupby(self.sku_grp)["alpha_eff"].mean()
