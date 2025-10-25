@@ -8,7 +8,7 @@ and segmented service targets.
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Tuple, Dict, Optional
+from typing import Tuple, Dict
 
 
 # ======================================================================
@@ -165,21 +165,13 @@ def compute_abc_xyz_segmentation(
     
     # Additional velocity stats for caps
     wk = sl[[col_mapping["store"], col_mapping["product"], "week_monday", "y"]].copy()
-    wk = wk.sort_values([col_mapping["store"], col_mapping["product"], "week_monday"])  # ensure chronological order
     p95_weekly = wk.groupby([col_mapping["store"], col_mapping["product"]])["y"].quantile(0.95).rename("p95_weekly")
     hist_max_weekly = wk.groupby([col_mapping["store"], col_mapping["product"]])["y"].max().rename("hist_max_weekly")
-
-    # Recent-13-week mean (for empirical cap)
-    def tail_mean(g: pd.DataFrame, k: int = 13) -> float:
-        return float(g["y"].tail(k).mean())
-
-    mu13_recent = wk.groupby([col_mapping["store"], col_mapping["product"]]).apply(tail_mean).rename("mu13_recent")
     
     # Combine into sku_meta
     sku_meta = (sku_stats
                 .merge(p95_weekly.reset_index(), on=[col_mapping["store"], col_mapping["product"]], how="left")
-                .merge(hist_max_weekly.reset_index(), on=[col_mapping["store"], col_mapping["product"]], how="left")
-                .merge(mu13_recent.reset_index(), on=[col_mapping["store"], col_mapping["product"]], how="left"))
+                .merge(hist_max_weekly.reset_index(), on=[col_mapping["store"], col_mapping["product"]], how="left"))
     
     # Display segmentation summary
     print("\n📊 ABC/XYZ SEGMENTATION SUMMARY:")
@@ -225,7 +217,6 @@ def compute_order_with_guardrails(
     abc: str,
     xyz: str,
     mu: float,
-    mu13_recent: Optional[float] = None,
     protection_weeks: int = 3
 ) -> int:
     """
@@ -245,13 +236,9 @@ def compute_order_with_guardrails(
     cap_emp = max(10, int(2.0 * float(hist_max or 0) * protection_weeks) - inv_pos)
     
     cap_vel = int(float(p95 or 0) * protection_weeks) if p95 else cap_emp
-
-    # Empirical mean cap: do not exceed ~3× recent 13-week mean
-    mu_ref = mu if mu13_recent is None or np.isnan(mu13_recent) else float(mu13_recent)
-    cap_mu = max(0, int(3.0 * mu_ref * protection_weeks) - inv_pos)
     
     # Final cap (most restrictive, but ignore vel if zero)
-    cap = max(0, min(cap_stat, cap_emp, cap_vel, cap_mu) if cap_vel > 0 else min(cap_stat, cap_emp, cap_mu))
+    cap = max(0, min(cap_stat, cap_emp, cap_vel) if cap_vel > 0 else min(cap_stat, cap_emp))
     
     # Floor: small hedge for high-priority items (A/X)
     floor_units = 2 if (abc == "A" and xyz == "X" and need > 0) else 0
@@ -261,10 +248,6 @@ def compute_order_with_guardrails(
     # TRIAGE: if model says zero but demand looks positive, order at least 1
     if order == 0 and need > 0 and mu > 0.2:
         order = 1
-    
-    # COLD-SKU CAP: if very low recent activity, clamp extreme orders
-    if (mu_ref or 0.0) < 0.5 and mu < 0.5:
-        order = min(order, 2)
     
     return int(order)
 
