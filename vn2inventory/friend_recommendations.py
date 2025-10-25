@@ -246,31 +246,26 @@ def compute_order_with_guardrails(
     
     cap_vel = int(float(p95 or 0) * protection_weeks) if p95 else cap_emp
 
-    # Empirical mean cap: do not exceed ~3× recent 13-week mean.
-    # IMPORTANT: Do not over-restrict when the recent mean is tiny; fall back to empirical cap in that case.
+    # Empirical mean cap: do not exceed ~3× recent 13-week mean
     mu_ref = mu if mu13_recent is None or np.isnan(mu13_recent) else float(mu13_recent)
-    if mu_ref >= 0.5:
-        cap_mu = max(0, int(3.0 * mu_ref * protection_weeks) - inv_pos)
-    else:
-        # If recent mean is very low, ignore this cap and rely on hist/velocity caps instead
-        cap_mu = cap_emp
+    cap_mu = max(0, int(3.0 * mu_ref * protection_weeks) - inv_pos)
     
     # Final cap (most restrictive, but ignore vel if zero)
     cap = max(0, min(cap_stat, cap_emp, cap_vel, cap_mu) if cap_vel > 0 else min(cap_stat, cap_emp, cap_mu))
     
     # Floor: small hedge for high-priority items (A/X)
-    floor_units = 2 if (abc == "A" and xyz == "X" and need > 0) else (1 if (abc in {"A","B"} and need > 0) else 0)
-
+    floor_units = 2 if (abc == "A" and xyz == "X" and need > 0) else 0
+    
     order = max(floor_units, min(max(0, need), cap))
-
+    
     # TRIAGE: if model says zero but demand looks positive, order at least 1
     if order == 0 and need > 0 and mu > 0.2:
         order = 1
     
-    # COLD-SKU CAP: if very low recent activity, clamp extreme orders but allow small hedges
+    # COLD-SKU CAP: if very low recent activity, clamp extreme orders
     if (mu_ref or 0.0) < 0.5 and mu < 0.5:
-        order = min(order, 4 if (abc in {"A","B"} and need > 0) else 2)
-
+        order = min(order, 2)
+    
     return int(order)
 
 
