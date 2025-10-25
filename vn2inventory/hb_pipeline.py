@@ -46,6 +46,9 @@ class HBConfig:
     data_dir: Path
     output_dir: Path
     graph_features_path: Optional[Path] = None
+    # Optional overrides for live runs
+    state_csv_override: Optional[Path] = None
+    sales_wide_override: Optional[Path] = None
     
     # Column mapping
     col_store: str = "Store"
@@ -119,22 +122,34 @@ class HBPipeline:
         
     def load_data(self) -> None:
         """Load all required data files."""
-        # Load sales_long
-        sales_candidates = [
-            self.config.data_dir / "Sales_long.csv",
-            self.config.data_dir.parent / "artifacts" / "hierarchical" / "sales_long_clean.csv",
-        ]
-        
-        sales_path = None
-        for p in sales_candidates:
-            if p.exists():
-                sales_path = p
-                break
-        
-        if sales_path is None:
-            raise FileNotFoundError(f"Could not find sales_long CSV in {sales_candidates}")
-        
-        self.sales_long = pd.read_csv(sales_path)
+        # Load sales history
+        if getattr(self.config, "sales_wide_override", None):
+            wide_p = Path(self.config.sales_wide_override)
+            if wide_p.exists():
+                wide = pd.read_csv(wide_p)
+                if not set([self.col["store"], self.col["product"]]).issubset(wide.columns):
+                    raise ValueError("Sales wide file missing Store/Product columns")
+                id_cols = [self.col["store"], self.col["product"]]
+                value_vars = [c for c in wide.columns if c not in id_cols]
+                long = wide.melt(id_vars=id_cols, var_name=self.col["week"], value_name=self.col["qty"]).copy()
+                long[self.col["week"]] = pd.to_datetime(long[self.col["week"]], errors="coerce")
+                long[self.col["qty"]] = pd.to_numeric(long[self.col["qty"]], errors="coerce").fillna(0.0)
+                self.sales_long = long.dropna(subset=[self.col["week"]])
+            else:
+                raise FileNotFoundError(f"sales_wide_override not found: {wide_p}")
+        else:
+            sales_candidates = [
+                self.config.data_dir / "Sales_long.csv",
+                self.config.data_dir.parent / "artifacts" / "hierarchical" / "sales_long_clean.csv",
+            ]
+            sales_path = None
+            for p in sales_candidates:
+                if p.exists():
+                    sales_path = p
+                    break
+            if sales_path is None:
+                raise FileNotFoundError(f"Could not find sales_long CSV in {sales_candidates}")
+            self.sales_long = pd.read_csv(sales_path)
         self.sales_long[self.col["qty"]] = pd.to_numeric(self.sales_long[self.col["qty"]], errors="coerce").fillna(0.0)
         self.sales_long[self.col["week"]] = pd.to_datetime(self.sales_long[self.col["week"]])
         
@@ -152,14 +167,27 @@ class HBPipeline:
         
         # Load index and state
         idx_path = self.config.data_dir / "Week 0 - Submission Template.csv"
-        state_path = self.config.data_dir / "Week 0 - 2024-04-08 - Initial State.csv"
+        # Prefer explicit state override if provided (e.g., dashboard state file)
+        state_path = Path(self.config.state_csv_override) if getattr(self.config, "state_csv_override", None) else (self.config.data_dir / "Week 0 - 2024-04-08 - Initial State.csv")
         
         self.idx_df = load_index(str(idx_path), self.col["store"], self.col["product"])
-        self.state_df = load_current_state(
-            str(state_path),
-            self.col["store"], self.col["product"], 
-            self.col["on_hand"], self.col["in_transit"]
-        )
+        # Map state columns: if override is provided, expect End Inventory/Transit columns
+        if getattr(self.config, "state_csv_override", None):
+            self.state_df = load_current_state(
+                current_state_csv_path=str(state_path),
+                store_col=self.col["store"],
+                product_col=self.col["product"],
+                on_hand_col="End Inventory",
+                in_transit_cols=["In Transit W+1", "In Transit W+2"],
+            )
+        else:
+            self.state_df = load_current_state(
+                current_state_csv_path=str(state_path),
+                store_col=self.col["store"],
+                product_col=self.col["product"], 
+                on_hand_col=self.col["on_hand"],
+                in_transit_cols=self.col["in_transit"],
+            )
         
         print(f"✅ Data loaded: {len(self.sales_long)} sales records, {len(self.idx_df)} SKUs")
         
