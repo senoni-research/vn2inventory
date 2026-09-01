@@ -1,6 +1,11 @@
-# Inventory planning starter
+# Inventory planning
 
-**Senoni Research** CLI for weekly store–product orders with a simple base-stock policy (2-week lead time by default).
+**Senoni Research** code for weekly store–product orders.
+
+Two layers:
+
+1. **Base-stock CLI** — mean/std demand, newsvendor `z`, order = `S −` inventory position.
+2. **Hierarchical Bayes pipeline** — department GLM, SKU-level empirical-Bayes shrinkage on the log-mean scale, optional hurdle for intermittent SKUs, optional graph features from [relational-graph](https://github.com/senoni-research/relational-graph).
 
 Bring your own sales, on-hand and in-transit CSVs. This repository does not include competition data.
 
@@ -27,7 +32,9 @@ Three CSVs:
 
 See `config.example.yml` for default column names. Any column can be overridden on the CLI.
 
-## Run
+`data/`, `artifacts/` and `submissions/` are gitignored.
+
+## Base-stock CLI
 
 ```bash
 python -m vn2inventory order \
@@ -38,14 +45,11 @@ python -m vn2inventory order \
   --config config.example.yml
 ```
 
-Column overrides:
+- Protection period `P = lead_time + review_period`
+- `S = mean_demand * P + z * std_demand * sqrt(P)`
+- `z` from a newsvendor critical ratio (shortage vs holding)
 
-```bash
-python -m vn2inventory order \
-  --sales HISTORY.csv --current STATE.csv --index INDEX.csv --out orders.csv \
-  --store-col Store --product-col Product --sales-qty-col Qty --sales-date-col Week \
-  --on-hand-col OnHand --in-transit-cols InTransit_W1,InTransit_W2
-```
+Output is a non-negative integer `order_qty` per index row. Lost sales are lost; holding applies to end-of-week on-hand only.
 
 If you have a local VN2-shaped extract (not in git), a typical mapping is:
 
@@ -61,15 +65,30 @@ python -m vn2inventory order \
   --in-transit-cols "In Transit W+1,In Transit W+2"
 ```
 
-`data/`, `artifacts/` and `submissions/` are gitignored.
+## Hierarchical Bayes
 
-## Policy
+```bash
+python scripts/run_hb_solution.py \
+  --model baseline \
+  --data-dir path/to/csvs \
+  --output-dir path/to/out
+```
 
-- Base-stock for protection period `P = lead_time + review_period`
-- `S = mean_demand * P + z * std_demand * sqrt(P)`
-- `z` comes from a newsvendor-like critical ratio (shortage vs holding)
+Graph-enhanced (features from the companion repo, not in this tree):
 
-Output is a non-negative integer `order_qty` per index row. Lost sales are lost; holding applies to end-of-week on-hand only.
+```bash
+python scripts/run_hb_solution.py \
+  --model graph-enhanced \
+  --features-599 path/to/orders_features_599.csv \
+  --data-dir path/to/csvs \
+  --output-dir path/to/out
+```
+
+SKU effects are shrunk on the **log-mean** scale. The within-SKU term is `Var(log residual) / n_weeks`. Mixing that with NB count variance (`μ + αμ²`) drives every weight to zero and forecasts the department average — that was a production bug and is fixed here.
+
+The hurdle sampler takes an unconditional weekly mean. The positive NB component is `μ / (1 − p0)`, so the zero process is applied once.
+
+See [scripts/README_HB_CLI.md](scripts/README_HB_CLI.md).
 
 ## License
 

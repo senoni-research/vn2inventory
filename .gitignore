@@ -34,6 +34,11 @@ ENV/
 .cursor/
 .specstory/
 
+# Local credentials
+.env
+.env.*
+!.env.example
+
 # Data and outputs (keep repo light)
 data/
 artifacts/
