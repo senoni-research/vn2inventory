@@ -85,59 +85,55 @@ def apply_eb_shrinkage(
 ) -> pd.DataFrame:
     """
     Apply Empirical Bayes shrinkage to SKU-specific effects.
-    
-    Uses log-scale residuals for multiplicative consistency.
+
+    Residuals and tau² live on the log-mean scale. The within-SKU term
+    is the sampling variance of the mean log-residual (var / n_weeks),
+    not the NB count variance. Mixing those units collapses every SKU
+    onto the department mean.
     """
-    # Global linear predictor and rate
     eta_global = res.model.predict(res.params, linear=True)
     mu_global = np.exp(eta_global)
     sl["mu_global"] = mu_global
-    
-    # Get alpha from NB family
+
     alpha = getattr(nb_fam, "alpha", 1.0)
-    nb_var = sl["mu_global"] + alpha * sl["mu_global"]**2
-    
-    # Log-scale residuals for multiplicative consistency
+
     eps = 1e-6
     sl["log_residual"] = np.log(sl["y"] + eps) - np.log(sl["mu_global"] + eps)
-    log_resid_mean_by_sku = sl["log_residual"].groupby(sl[sku_grp].apply(tuple, axis=1)).mean()
-    nb_var_by_sku = nb_var.groupby(sl[sku_grp].apply(tuple, axis=1)).mean()
-    
-    # Between-SKU variance (method-of-moments proxy)
-    sku_var_y = sl.groupby(sku_grp)["y"].var().fillna(0.0)
-    sku_mean_mu = sl.groupby(sku_grp)["mu_global"].mean()
-    nb_var_sku_mean = nb_var_by_sku.reindex(sku_var_y.index.map(tuple)).values if hasattr(nb_var_by_sku, "index") else np.array([alpha])
-    var_between = (sku_var_y - pd.Series(nb_var_sku_mean, index=sku_var_y.index)).clip(lower=0.0)
-    
-    # Base tau2 from between-SKU variance
+    sku_key = sl[sku_grp].apply(tuple, axis=1)
+    g = sl.groupby(sku_key)["log_residual"]
+    n_i = g.size().clip(lower=1)
+    log_resid_mean_by_sku = g.mean()
+    log_resid_var = g.var(ddof=1)
+    log_resid_var = log_resid_var.fillna(g.var(ddof=0)).fillna(0.0)
+    sigma2_mean = (log_resid_var / n_i).clip(lower=1e-8)
+
     if tau2 is None:
-        tau2 = float(var_between.median()) if np.isfinite(var_between.median()) else 1e-6
-        if tau2 <= 0.0:
-            tau2 = 1e-6
-    
-    sigma2_i = nb_var_by_sku.reindex(log_resid_mean_by_sku.index).fillna(nb_var_by_sku.median())
-    w = tau2 / (tau2 + sigma2_i.replace(0.0, 1e-6))
-    
-    # Shrunk SKU adjustment
-    delta_raw = log_resid_mean_by_sku
-    shrunk_delta = (w * delta_raw).rename("delta_sku")
-    
-    # Map back to rows
-    idx_tuples = sl[sku_grp].apply(tuple, axis=1)
+        between = float(log_resid_mean_by_sku.var(ddof=1)) if len(log_resid_mean_by_sku) > 1 else 1e-3
+        tau2 = max(between - float(sigma2_mean.mean()), 1e-4)
+
+    w = tau2 / (tau2 + sigma2_mean)
+    shrunk_delta = (w * log_resid_mean_by_sku).rename("delta_sku")
+
+    idx_tuples = sku_key
     sl = sl.join(shrunk_delta, on=idx_tuples)
     sl["delta_sku"] = sl["delta_sku"].fillna(0.0)
     sl["mu_eb"] = sl["mu_global"] * np.exp(sl["delta_sku"])
-    
-    # Diagnostics
+
     mse_glob = mean_squared_error(sl["y"], sl["mu_global"])
     mse_eb = mean_squared_error(sl["y"], sl["mu_eb"])
     rmse_glob = float(np.sqrt(mse_glob))
     rmse_eb = float(np.sqrt(mse_eb))
-    
-    print(f"✅ EB shrinkage applied (tau²={tau2:.6f})")
+    w_vals = w.to_numpy()
+
+    print(f"✅ EB shrinkage applied (tau²={tau2:.6f}, log-scale)")
     print(f"   RMSE: global={rmse_glob:.2f}, EB={rmse_eb:.2f}")
-    
-    return sl, tau2, alpha, log_resid_mean_by_sku, nb_var_by_sku
+    print(
+        f"   SKU weight w: median={float(np.median(w_vals)):.3f} "
+        f"p10={float(np.quantile(w_vals, 0.10)):.3f} "
+        f"p90={float(np.quantile(w_vals, 0.90)):.3f}"
+    )
+
+    return sl, tau2, alpha, log_resid_mean_by_sku, sigma2_mean
 
 
 # ======================================================================
@@ -148,17 +144,16 @@ def tau2_sweep(
     sl: pd.DataFrame,
     sku_grp: list,
     log_resid_mean_by_sku: pd.Series,
-    nb_var_by_sku: pd.Series,
+    sigma2_mean_by_sku: pd.Series,
     tau2_grid: list,
     val_frac: float = 0.2,
     val_min: int = 8,
     min_sku_history: int = 16
 ) -> Tuple[float, pd.DataFrame]:
     """
-    Sweep tau² grid and pick value that minimizes validation RMSE.
-    
-    Returns:
-        (best_tau2, sl_with_best_mu_eb)
+    Sweep tau² on the log-mean scale. `sigma2_mean_by_sku` must be the
+    sampling variance of each SKU's mean log-residual (var / n), not
+    the NB count variance.
     """
     # Build validation mask for temporal holdout
     max_t = sl.groupby(sku_grp)["t"].transform("max")
@@ -172,7 +167,7 @@ def tau2_sweep(
     best = {"tau2": None, "rmse": np.inf, "median_w": None}
     
     delta_raw_full = log_resid_mean_by_sku
-    sigma2_i_full = nb_var_by_sku.reindex(log_resid_mean_by_sku.index).fillna(nb_var_by_sku.median())
+    sigma2_i_full = sigma2_mean_by_sku.reindex(log_resid_mean_by_sku.index).fillna(sigma2_mean_by_sku.median())
     
     for t2 in tau2_grid:
         w_g = t2 / (t2 + sigma2_i_full.replace(0.0, 1e-6))

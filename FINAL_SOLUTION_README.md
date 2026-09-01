@@ -1,6 +1,8 @@
-# ✅ Final HB Solution - Production Ready
+# Hierarchical Bayes pipeline
 
-## 🎯 What We Built
+The official public path is `scripts/run_hb_solution.py` on `main`.
+
+SKU shrinkage is on the **log-mean** scale (`Var(log residual) / n_weeks`). An earlier mix of that with NB count variance collapsed every SKU onto its department mean. The hurdle uses `μ / (1 − p0)` as the positive component.
 
 A production-ready Hierarchical Bayes pipeline with:
 - ✅ **Historical state reconstruction** for accurate CV
@@ -26,7 +28,7 @@ A production-ready Hierarchical Bayes pipeline with:
 
 ---
 
-## 🚀 Final Command (Winning Submission)
+## Run
 
 ```bash
 cd /Users/senoni/noni/vn2inventory
@@ -41,7 +43,7 @@ python scripts/run_hb_solution.py \
 # Output: submissions/final/orders_hierarchical_graph_enhanced_cv.csv
 ```
 
-**This produces the winning submission** with:
+Typical output shape:
 - CV cost: **~3204** (best of all runs)
 - Max order: **270** (capped, was 380)
 - Total units: **~2752** (balanced)

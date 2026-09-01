@@ -1,10 +1,20 @@
-VN2 Inventory Planning Starter
+# Inventory planning
 
-Quickstart to compute weekly orders using a simple base-stock policy with 2-week lead time.
+**Senoni Research** code for weekly store–product orders.
 
-Setup
+Two layers:
 
-1. Create a virtual environment and install dependencies:
+1. **Base-stock CLI** — mean/std demand, newsvendor `z`, order = `S −` inventory position.
+2. **Hierarchical Bayes pipeline** — department GLM, SKU-level empirical-Bayes shrinkage on the log-mean scale, optional hurdle for intermittent SKUs, optional graph features from [relational-graph](https://github.com/senoni-research/relational-graph).
+
+Bring your own sales, on-hand and in-transit CSVs. This repository does not include competition data.
+
+Companion repos:
+
+- [senoni-research/relational-graph](https://github.com/senoni-research/relational-graph) — temporal graph scorer and gated order policies
+- [senoni-research/timesfm](https://github.com/senoni-research/timesfm) — TimesFM 2.5 quantile notes for the same setting
+
+## Install
 
 ```bash
 python3 -m venv .venv
@@ -12,16 +22,19 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Inputs
+## Inputs
 
-You need three CSVs:
-- Index CSV: row order to match the platform (columns: `Store`, `Product` or as configured).
-- Historical Sales CSV: weekly sales history. Columns include index columns and a quantity column; a week/date column is optional.
-- Current State CSV: contains on-hand and in-transit quantities for each `(Store, Product)` pair.
+Three CSVs:
 
-See `config.example.yml` for column names. You can also override any column via CLI flags.
+- **Index** — row order for the output (`Store`, `Product`, or as configured)
+- **Sales history** — weekly quantities; a week/date column is optional
+- **Current state** — on-hand and in-transit per `(Store, Product)`
 
-Run
+See `config.example.yml` for default column names. Any column can be overridden on the CLI.
+
+`data/`, `artifacts/` and `submissions/` are gitignored.
+
+## Base-stock CLI
 
 ```bash
 python -m vn2inventory order \
@@ -32,42 +45,37 @@ python -m vn2inventory order \
   --config config.example.yml
 ```
 
-Common overrides (if your columns differ):
+- Protection period `P = lead_time + review_period`
+- `S = mean_demand * P + z * std_demand * sqrt(P)`
+- `z` from a newsvendor critical ratio (shortage vs holding)
+
+Output is a non-negative integer `order_qty` per index row.
+
+## Hierarchical Bayes
 
 ```bash
-python -m vn2inventory order \
-  --sales HISTORY.csv --current STATE.csv --index INDEX.csv --out orders.csv \
-  --store-col Store --product-col Product --sales-qty-col Qty --sales-date-col Week \
-  --on-hand-col OnHand --in-transit-cols InTransit_W1,InTransit_W2
+python scripts/run_hb_solution.py \
+  --model baseline \
+  --data-dir path/to/csvs \
+  --output-dir path/to/out
 ```
 
-Order #1 (competition data) mapping
-
-For the initial dataset, use `End Inventory` as Week 1 on-hand, and pass the in-transit columns as shown:
+Graph-enhanced (features from the companion repo, not in this tree):
 
 ```bash
-python -m vn2inventory order \
-  --sales artifacts/order1/sales_long.csv \
-  --current "data/Week 0 - 2024-04-08 - Initial State.csv" \
-  --index "data/Week 0 - Submission Template.csv" \
-  --out submissions/orders_round1_cli.csv \
-  --store-col Store --product-col Product \
-  --sales-qty-col SalesQty --sales-date-col Week \
-  --on-hand-col "End Inventory" \
-  --in-transit-cols "In Transit W+1,In Transit W+2"
+python scripts/run_hb_solution.py \
+  --model graph-enhanced \
+  --features-599 path/to/orders_features_599.csv \
+  --data-dir path/to/csvs \
+  --output-dir path/to/out
 ```
 
-Policy
+SKU effects are shrunk on the **log-mean** scale. The within-SKU term is `Var(log residual) / n_weeks`. Mixing that with NB count variance (`μ + αμ²`) drives every weight to zero and forecasts the department average — that was a production bug and is fixed here.
 
-- Base-stock for protection period `P = lead_time + review_period`.
-- `S = mean_demand * P + z * std_demand * sqrt(P)`.
-- `z` is chosen from a newsvendor-like critical ratio using shortage vs. effective holding cost during the cycle.
+The hurdle sampler takes an unconditional weekly mean. The positive NB component is `μ / (1 − p0)`, so the zero process is applied once.
 
-Output
+See [scripts/README_HB_CLI.md](scripts/README_HB_CLI.md).
 
-- Produces `orders.csv` with the same `(Store, Product)` index and a single column (default `order_qty`). All quantities are non-negative integers.
+## License
 
-Notes
-
-- No backorders are modeled; lost sales are lost.
-- Holding cost is applied to end-of-week on-hand stock; goods in transit have no holding cost.
+MIT. See [LICENSE](LICENSE).

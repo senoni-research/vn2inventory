@@ -55,18 +55,23 @@ def sample_D3_hurdle_canonical(
     seed: int = 42
 ) -> np.ndarray:
     """
-    3-week Hurdle (Bernoulli × NB2) demand sampler.
-    
-    p0: probability of zero demand (computed on available weeks only)
+    3-week hurdle (Bernoulli × NB2) sampler.
+
+    `mu` is the unconditional weekly mean E[Y], zeros included.
+    The positive component is therefore mu / (1 - p0). Passing
+    unconditional mu straight into the NB gate would apply p0 twice.
     """
     rng = np.random.default_rng(seed)
     if mu <= 0:
         return np.zeros(K, dtype=int)
-    
+
+    p0 = float(np.clip(p0, 0.0, 1.0 - 1e-6))
+    mu_plus = float(mu) / (1.0 - p0)
+
     dsum = np.zeros(K, dtype=int)
     for _ in range(weeks):
-        active = rng.random(K) < (1.0 - float(p0))
-        nb = draw_nb2_canonical(mu, phi, size=K, rng=rng)
+        active = rng.random(K) < (1.0 - p0)
+        nb = draw_nb2_canonical(mu_plus, phi, size=K, rng=rng)
         dsum += (nb * active).astype(int)
     return dsum
 

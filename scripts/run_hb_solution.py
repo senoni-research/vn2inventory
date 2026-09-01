@@ -63,8 +63,8 @@ def main():
     parser.add_argument(
         "--features-599",
         type=str,
-        default=str(Path("/Users/senoni/noni/relational-graph/artifacts/orders_features_599_idemb_asof.csv")),
-        help="Path to 599-row features with weekly moments for weekly judge"
+        default=None,
+        help="Path to 599-row graph features CSV (required for --model graph-enhanced)"
     )
     parser.add_argument(
         "--cutoff",
@@ -94,9 +94,9 @@ def main():
     
     # Graph features path (only for graph-enhanced model)
     if args.model == "graph-enhanced":
-        # Use new as-of features with weekly moments (mu_w1, mu_w2, mu_w3, sigma_w1, sigma_w2, sigma_w3)
-        graph_features_path = Path("/Users/senoni/noni/relational-graph/artifacts/orders_features_599_idemb_asof.csv")
-        if not graph_features_path.exists():
+        # Prefer CLI-provided features-599 path
+        graph_features_path = Path(args.features_599) if args.features_599 else None
+        if graph_features_path and not graph_features_path.exists():
             print(f"⚠️ Graph features not found: {graph_features_path}")
             print("   Falling back to baseline model")
             graph_features_path = None

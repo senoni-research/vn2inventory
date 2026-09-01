@@ -2,14 +2,19 @@
 
 ## 🚀 Quick Start (Production)
 
-### Winning Submission (Graph-Enhanced with Cap):
 ```bash
-cd /Users/senoni/noni/vn2inventory
-mkdir -p submissions/final
-python scripts/run_hb_solution.py --model graph-enhanced --output-dir submissions/final --apply-cap
+python scripts/run_hb_solution.py --model baseline --data-dir path/to/csvs --output-dir path/to/out
 ```
 
-**Output**: `submissions/final/orders_hierarchical_graph_enhanced_cv.csv` ✨
+Graph-enhanced needs a features file from [relational-graph](https://github.com/senoni-research/relational-graph):
+
+```bash
+python scripts/run_hb_solution.py \
+  --model graph-enhanced \
+  --features-599 path/to/orders_features_599.csv \
+  --data-dir path/to/csvs \
+  --output-dir path/to/out
+```
 
 ---
 
